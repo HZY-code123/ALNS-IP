@@ -1,0 +1,664 @@
+from gurobipy import *
+import matplotlib.pyplot as plt
+import random as rd
+import numpy as np
+import copy
+import time
+import math
+
+n_a = 24
+n_u = 10
+n_d = 240
+n_c = [0,
+       4,
+       2,
+       6,
+       8,
+       10,
+       5,
+       5,
+       6,
+       6,
+       4,
+       4,
+       6,
+       8,
+       6,
+       10,
+       6,
+       4,
+       4,
+       6,
+       5,
+       2,
+       3,
+       2,
+       5]
+
+u_d = [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
+       [0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+       [0, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
+       [0, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9],
+       [0, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13],
+       [0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+       [0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+       [0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+       [0, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9],
+       [0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+       [0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+       [0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7],
+       [0, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9],
+       [0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+       [0, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20],
+       [0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7],
+       [0, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9],
+       [0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7],
+       [0, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
+       [0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+       [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+       [0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
+       [0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+       [0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]]
+
+u_d = np.array(u_d)
+
+
+def preprocess(activity, unit, deadline, unit_duration):
+   
+    activity = activity + 1
+    unit = unit + 1
+
+    
+    unit_time_range = np.zeros((activity, unit, 2), dtype=int)          
+    fast_unit_duration = np.zeros((activity, unit), dtype=int)
+    for i in range(1, activity):
+        for j in range(1, unit):
+            fast_unit_duration[i][j] = unit_duration[i][j]
+
+    for i in range(1, activity):
+        if i == 1:
+            for j in range(1, unit):
+                unit_time_range[i][j][0] = fast_unit_duration[i][j]
+                unit_time_range[i][j][1] = deadline - sum(fast_unit_duration[2:activity, j])
+        elif i == activity:
+            for j in range(1, unit):
+                unit_time_range[i][j][0] = sum(fast_unit_duration[1:i-1, j])
+                unit_time_range[i][j][1] = deadline
+        else:
+            for j in range(1, unit):
+                unit_time_range[i][j][0] = sum(fast_unit_duration[1:i+1, j])
+                unit_time_range[i][j][1] = deadline - sum(fast_unit_duration[i+1:activity, j])
+
+    return unit_time_range
+
+
+
+def initialization(activity, unit, deadline, crew, unit_duration):
+
+   
+    activity = activity + 1
+    unit = unit + 1
+
+    
+    temp_time = deadline + 1
+
+    while temp_time > deadline:
+        project_schedule = np.zeros((activity, unit, 3), dtype=int)
+        activity_matrix = np.zeros((activity, unit), dtype=int)  
+        activity_matrix[0, :] = 1
+        activity_matrix[:, 0] = 1                     
+        activity_crew = [[] for i in range(activity)]  
+        activity_process = [[] for i in range(activity)]  
+        unit_est = np.zeros((activity, unit, 1), dtype=int)  
+        row = 1
+        col = 1
+
+        
+        while np.all(activity_matrix) == 0:
+            
+            if not activity_crew[row]:
+                crew_number = rd.randint(1, crew[row])    
+                activity_crew[row] = crew_number
+            else:
+                crew_number = activity_crew[row]
+            
+            if any(activity_process[row]):             
+                crew_process = activity_process[row]
+            else:
+                crew_process = np.zeros((crew_number, 1), dtype=int)  
+                activity_process[row] = crew_process
+            temp_fast = np.where(crew_process == crew_process.min())[0]  
+            temp_number = rd.randint(1, len(temp_fast))  
+            fast_crew_index = temp_fast[temp_number - 1]  
+            
+            if row == 1 and col == 1:  
+                project_schedule[row][col][0] = 0
+            elif np.all(project_schedule[row] == 0):  
+                project_schedule[row][col][0] = unit_est[row][col]
+            else:
+                current_activity = project_schedule[row]   
+                col_index = np.where(current_activity[:, 2] == fast_crew_index + 1)[0]  
+                if len(col_index) == 0:  
+                    project_schedule[row][col][0] = unit_est[row][col]
+                else:  
+                    project_schedule[row][col][0] = max(project_schedule[row][col_index[-1]][1], unit_est[row][col])
+            project_schedule[row][col][1] = project_schedule[row][col][0] + unit_duration[row][col]
+            project_schedule[row][col][2] = fast_crew_index + 1
+            if row < activity - 1:
+                unit_est[row + 1][col] = project_schedule[row][col][1]
+            
+            crew_process[fast_crew_index] = project_schedule[row][col][1]  
+            activity_process[row] = crew_process  
+            activity_matrix[row][col] = 1  
+            
+            if (activity_matrix == 1).all():
+                break
+            else:
+                
+                temp = rd.randint(1, 2)
+                if temp == 1 and row < activity - 1:
+                    row = row + 1
+                elif temp == 2 and col < unit - 1:
+                    col = col + 1
+                else:  
+                    other = np.argwhere(activity_matrix == 0)
+                    row = other[0, 0]
+                    col = other[0, 1]
+                judge_unit = activity_matrix[row, 0:col]
+                unit_index = np.nonzero(judge_unit == 0)[0]
+                if len(unit_index) > 0:
+                    first_index = unit_index[0]
+                    col = first_index
+                else:
+                    judge_activity = activity_matrix[0:row, col]
+                    activity_index = np.nonzero(judge_activity == 0)[0]
+                    if len(activity_index) > 0:
+                        first_index = activity_index[0]
+                        row = first_index
+
+        temp_time = project_schedule.max()
+
+    return project_schedule
+
+
+
+def destroy_operator(destroy_weight, current_solution, activity, unit, crew, unit_duration, deadline):
+    destroy_count = -1
+    copy_solution = copy.deepcopy(current_solution)
+    removed_information = np.zeros((activity + 1, unit + 1), dtype=int)
+    destroy_roulette = np.array(destroy_weight).cumsum()
+    r = rd.uniform(0, max(destroy_roulette))
+    for i in range(len(destroy_roulette)):
+        if destroy_roulette[i] >= r:
+            if i == 0:
+                index = 100
+                destroy_count = i
+                removed_solution = crew_destroy(copy_solution, activity)
+                destroyUseTimes[i] += 1
+                break
+            elif i == 1:
+                index = 100
+                destroy_count = i
+                removed_solution = unit_destroy(copy_solution, activity, unit)
+                destroyUseTimes[i] += 1
+                break
+            elif i == 2:
+                destroy_count = i
+                removed_solution = copy.deepcopy(copy_solution)
+                index = optimization_space_destroy(copy_solution, activity, unit, deadline)
+               
+                for ii in range(1, index):
+                    for j in range(1, unit + 1):
+                        column_time = [row[j] for row in unit_duration]
+                        column_time = np.array(column_time)
+                        each_unit_time = column_time[ii: index]   
+                        judge_time = sum(each_unit_time) + copy_solution[ii][j, 0]   
+                        if judge_time == copy_solution[index][j, 0]:    
+                            removed_information[ii][j] = copy_solution[ii][j, 2]     
+                
+                for ii in range(1, activity+1):
+                    crew_column = [jj[2] for jj in copy_solution[ii]]  
+                    arr = removed_information[ii]
+                    filtered_arr = arr[arr > 0]
+                    crew_number = np.unique(filtered_arr)
+                    for j in range(len(crew_number)):
+                        crew_index = [k for k, v in enumerate(crew_column) if v == crew_number[j]]  
+                        for k in range(len(crew_index)):
+                            removed_solution[ii][crew_index[k]][:] = 0
+                removed_solution[index:] = 0
+                destroyUseTimes[i] += 1
+                break
+            elif i == 3:
+                destroy_count = i
+                removed_solution = copy.deepcopy(copy_solution)
+                index = mobility_destroy(copy_solution, activity, crew, unit_duration)
+                
+                for ii in range(1, index):
+                    for j in range(1, unit + 1):
+                        column_time = [row[j] for row in unit_duration]
+                        column_time = np.array(column_time)
+                        each_unit_time = column_time[ii: index]   
+                        judge_time = sum(each_unit_time) + copy_solution[ii][j, 0]    
+                        if judge_time == copy_solution[index][j, 0]:    
+                            removed_information[ii][j] = copy_solution[ii][j, 2]    
+                
+                for ii in range(1, activity+1):
+                    crew_column = [jj[2] for jj in copy_solution[ii]]  
+                    arr = removed_information[ii]
+                    filtered_arr = arr[arr > 0]
+                    crew_number = np.unique(filtered_arr)
+                    for j in range(len(crew_number)):
+                        crew_index = [k for k, v in enumerate(crew_column) if v == crew_number[j]]  
+                        for k in range(len(crew_index)):
+                            removed_solution[ii][crew_index[k]][:] = 0
+                removed_solution[index:] = 0
+                destroyUseTimes[i] += 1
+                break
+            elif i == 4:
+                destroy_count = i
+                removed_solution = copy.deepcopy(copy_solution)
+                index = duration_destroy(copy_solution, activity, unit)
+                
+                for ii in range(1, index):
+                    for j in range(1, unit + 1):
+                        column_time = [row[j] for row in unit_duration]
+                        column_time = np.array(column_time)
+                        each_unit_time = column_time[ii: index]   
+                        judge_time = sum(each_unit_time) + copy_solution[ii][j, 0]    
+                        if judge_time == copy_solution[index][j, 0]:    
+                            removed_information[ii][j] = copy_solution[ii][j, 2]     
+                
+                for ii in range(1, activity+1):
+                    crew_column = [jj[2] for jj in copy_solution[ii]]  
+                    arr = removed_information[ii]
+                    filtered_arr = arr[arr > 0]
+                    crew_number = np.unique(filtered_arr)
+                    for j in range(len(crew_number)):
+                        crew_index = [k for k, v in enumerate(crew_column) if v == crew_number[j]]  
+                        for k in range(len(crew_index)):
+                            removed_solution[ii][crew_index[k]][:] = 0
+                removed_solution[index:] = 0
+                destroyUseTimes[i] += 1
+                break
+            elif i == 5:
+                destroy_count = i
+                removed_solution = copy.deepcopy(copy_solution)
+                index = crew_number_destroy(copy_solution, activity)
+                
+                for ii in range(1, index):
+                    for j in range(1, unit + 1):
+                        column_time = [row[j] for row in unit_duration]
+                        column_time = np.array(column_time)
+                        each_unit_time = column_time[ii: index]   
+                        judge_time = sum(each_unit_time) + copy_solution[ii][j, 0]    
+                        if judge_time == copy_solution[index][j, 0]:    
+                            removed_information[ii][j] = copy_solution[ii][j, 2]    
+                
+                for ii in range(1, activity+1):
+                    crew_column = [jj[2] for jj in copy_solution[ii]] 
+                    arr = removed_information[ii]
+                    filtered_arr = arr[arr > 0]
+                    crew_number = np.unique(filtered_arr)
+                    for j in range(len(crew_number)):
+                        crew_index = [k for k, v in enumerate(crew_column) if v == crew_number[j]] 
+                        for k in range(len(crew_index)):
+                            removed_solution[ii][crew_index[k]][:] = 0
+                removed_solution[index:] = 0
+                destroyUseTimes[i] += 1
+                break
+
+    return copy_solution, removed_solution, destroy_count, index        
+
+
+def crew_destroy(copy_solution, activity):
+    incomplete_solution = copy.deepcopy(copy_solution)
+    for i in range(1, activity+1):                            
+        crew_column = [j[2] for j in incomplete_solution[i]]  
+        remove_number = rd.randint(1, max(crew_column))       
+        remove_index = rd.sample(range(1, max(crew_column) + 1), remove_number) 
+        for j in range(remove_number):
+            crew_index = [k for k, v in enumerate(crew_column) if v == remove_index[j]]  
+            for k in range(len(crew_index)):
+                incomplete_solution[i][crew_index[k]][:] = 0
+    return incomplete_solution
+
+
+def unit_destroy(copy_solution, activity, unit):
+    incomplete_solution = copy.deepcopy(copy_solution)
+    for i in range(1, activity+1):
+        remove_number = rd.randint(1, unit)                   
+        remove_index = rd.sample(range(1, unit+1), remove_number)  
+        for j in range(remove_number):
+            incomplete_solution[i][remove_index[j]][:] = 0
+    return incomplete_solution
+
+
+def optimization_space_destroy(copy_solution, activity, unit, deadline):
+    optimization_space = np.zeros(activity+1, dtype=int)
+    for i in range(1, activity+1):
+        if i == 1:
+            unit_low = np.zeros(unit+1, dtype=int)
+            unit_up = copy_solution[i+1][:, 0]
+        elif i == activity:
+            unit_low = copy_solution[i-1][:, 1]
+            unit_up = np.ones(unit+1, dtype=int) * deadline
+            unit_up[0] = 0       
+        else:
+            unit_low = copy_solution[i-1][:, 1]            
+            unit_up = copy_solution[i+1][:, 0]             
+        optimization_space[i] = sum(unit_up - unit_low)
+    max_value = max(optimization_space)
+    max_index = [index for index, value in enumerate(optimization_space) if value == max_value][0]
+    return max_index
+
+
+def mobility_destroy(copy_solution, activity, crew, unit_duration):
+    mobility = np.zeros(activity+1, dtype=int)
+    for i in range(1, activity+1):
+        duration_slow = sum(unit_duration[i])      
+        duration_fast = math.ceil((len(unit_duration[i])-1)/crew[i]) * unit_duration[i][1]   
+        mobility[i] = duration_slow - duration_fast
+    max_value = max(mobility)
+    max_index = [index for index, value in enumerate(mobility) if value == max_value][0]
+    return max_index
+
+
+def duration_destroy(copy_solution, activity, unit):
+    duration = np.zeros(activity+1, dtype=int)
+    for i in range(1, activity+1):
+        duration[i] = copy_solution[i][unit, 1] - copy_solution[i][1, 0]
+    max_value = max(duration)
+    max_index = [index for index, value in enumerate(duration) if value == max_value][0]
+    return max_index
+
+
+def crew_number_destroy(copy_solution, activity):
+    crew_number = np.zeros(activity+1, dtype=int)
+    for i in range(1, activity+1):
+        column = [row[-1] for row in copy_solution[i]]
+        crew_number[i] = len(set(column))        
+    min_value = min(crew_number[crew_number > 0])
+    min_index = [index for index, value in enumerate(crew_number) if value == min_value][0]
+    return min_index
+
+
+
+def repair_operator(destroy_solution, unit_duration, crew, best_solution, current_time_range):
+    ab = "feasible"
+    repair_solution = copy.deepcopy(destroy_solution)
+    shape = destroy_solution.shape
+    activity = shape[0]
+    unit = shape[1]
+    deadline = current_time_range.max()
+
+    all_activity = range(1, activity)
+    all_unit = range(1, unit)
+    all_deadline = range(1, deadline+1)
+
+    
+    model = Model()
+    M = 1000     
+
+   
+    model.Params.IntegralityFocus = 1
+
+    
+    x = {}
+    for i in all_activity:
+        for j in all_unit:
+            for k in range(1, crew[i]+1):
+                for t in all_deadline:
+                    x[i, j, k, t] = model.addVar(vtype=GRB.BINARY, name="x")
+
+    
+    z = model.addVar(lb=176, ub=deadline, vtype=GRB.INTEGER, name="z")
+
+    
+    for j in all_unit:
+        model.addConstr(sum(x[activity - 1, j, k, t] * t for k in range(1, crew[activity - 1]+1)
+                            for t in all_deadline) <= z)
+
+    
+    for i in all_activity:
+        for j in all_unit:
+            for t in all_deadline:
+                if t < current_time_range[i][j][0] or t > current_time_range[i][j][1]:
+                    for k in range(1, crew[i]+1):
+                        model.addConstr(x[i, j, k, t] == 0)
+
+    
+    for i in all_activity:
+        for j in all_unit:
+            if destroy_solution[i][j][1] > 0:
+                crew_number = destroy_solution[i][j][2]
+                finish_time = destroy_solution[i][j][1]  
+                model.addConstr(x[i, j, crew_number, finish_time] == 1)
+
+    
+    for i in all_activity:
+        for j in all_unit:
+            model.addConstr(sum(x[i, j, k, t] for k in range(1, crew[i]+1) for t in all_deadline) == 1)
+
+    
+    for i in all_activity:
+        for j in all_unit:
+            for nj in range(j + 1, unit):
+                for k in range(1, crew[i]+1):
+                    model.addConstr(sum(x[i, nj, k, t] * t for t in all_deadline) - unit_duration[i][nj]
+                                    + M * (1 - sum(x[i, nj, k, t] for t in all_deadline))
+                                    >= sum(x[i, j, k, t] * t for t in all_deadline))
+
+    
+    for i in range(1, activity - 1):
+        for j in all_unit:
+            model.addConstr(sum(x[i + 1, j, k, t] * t for k in range(1, crew[i + 1]+1) for t in all_deadline)
+                            - unit_duration[i + 1][j]
+                            + M * (1 - sum(x[i + 1, j, k, t] for k in range(1, crew[i + 1]+1) for t in all_deadline))
+                            >= sum(x[i, j, k, t] * t for k in range(1, crew[i]+1) for t in all_deadline))
+
+    
+    for j in all_unit:
+        model.addConstr(sum(x[1, j, k, t] * t for k in range(1, crew[1]+1) for t in all_deadline)
+                        - sum(x[1, j, k, t] for k in range(1, crew[1]+1) for t in all_deadline)
+                        * unit_duration[1][j] >= 0)
+
+    
+    model.setObjective(z, GRB.MINIMIZE)
+
+   
+    model.Params.TimeLimit = 40
+
+
+    model.optimize()
+
+
+    if model.status == GRB.TIME_LIMIT:
+        if model.SolCount > 0:
+            model.Params.SolutionNumber = 0
+            for i in all_activity:
+                for j in all_unit:
+                    for k in range(1, crew[i] + 1):
+                        for t in all_deadline:
+                            if x[i, j, k, t].x == 1:
+                                repair_solution[i][j][1] = t
+                                repair_solution[i][j][2] = k
+                                repair_solution[i][j][0] = \
+                                    repair_solution[i][j][1] - unit_duration[i][j]
+        else:
+            repair_solution = best_solution
+        ab = "time_limit"
+
+    elif model.status == GRB.Status.OPTIMAL:
+        for i in all_activity:
+            for j in all_unit:
+                for k in range(1, crew[i] + 1):
+                    for t in all_deadline:
+                        if x[i, j, k, t].x == 1:
+                            repair_solution[i][j][1] = t
+                            repair_solution[i][j][2] = k
+                            repair_solution[i][j][0] = \
+                                repair_solution[i][j][1] - unit_duration[i][j]
+
+    else:
+        repair_solution = best_solution
+        ab = "infeasible"
+    
+    return repair_solution, ab
+
+
+
+def update_time(destroy_solution, unit_time_range, unit_duration):
+    update_time_range = copy.deepcopy(unit_time_range)
+    shape = destroy_solution.shape   
+    activity = shape[0]             
+    unit = shape[1]                  
+
+    for i in range(1, activity):
+        for j in range(1, unit):
+            if i != activity - 1: 
+                candidate_late_et = destroy_solution[i + 1: activity, j, 0]      
+                no_zero_late = np.nonzero(candidate_late_et)[0]  
+                if len(no_zero_late) != 0:
+                    late_index = np.flatnonzero(candidate_late_et)[0]              
+                    if late_index == 0:  
+                        update_time_range[i][j, 1] = min(unit_time_range[i][j, 1],
+                                                         candidate_late_et[late_index])  
+                    else:
+                        late_time = 0
+                        for k in range(i + 1, i + 1 + late_index):  
+                            fast_duration = unit_duration[k][j]
+                            late_time = late_time + fast_duration
+                        update_time_range[i][j, 1] = min(unit_time_range[i][j, 1],
+                                                         candidate_late_et[late_index] - late_time)
+            if i != 1:  
+                candidate_early_et = destroy_solution[1: i, j, 1]  
+                no_zero_early = np.nonzero(candidate_early_et)[0]  
+                if len(no_zero_early) != 0:
+                    early_index = np.flatnonzero(candidate_early_et)[
+                        -1]  
+                    if early_index + 1 == i - 1:  
+                        update_time_range[i][j, 0] = max(unit_time_range[i][j, 0],
+                                                         candidate_early_et[early_index] + unit_duration[i][j])  
+                    else:
+                        early_time = 0
+                        for k in range(early_index + 1 + 1,
+                                       i + 1): 
+                            fast_duration = unit_duration[k][j]
+                            early_time = early_time + fast_duration
+                        update_time_range[i][j, 0] = max(unit_time_range[i][j, 0],
+                                                         candidate_early_et[early_index] + early_time)
+
+    for i in range(1, activity):
+        for j in range(1, unit):
+            if destroy_solution[i][j][1] > 0:
+                update_time_range[i][j][0] = destroy_solution[i][j][1]
+                update_time_range[i][j][1] = destroy_solution[i][j][1]
+
+    return update_time_range
+
+
+def objective_calculation(project_schedule):
+    make_span = project_schedule.max()    
+    return make_span
+
+
+# mian
+T = 100
+a = 0.97
+b = 0.5
+wDestroy = [1 for i in range(6)]              
+wRepair = [1 for i in range(1)]               
+destroyUseTimes = [0 for i in range(6)]       
+repairUseTimes = [0 for i in range(1)]        
+destroyScore = [1 for i in range(6)]          
+repairScore = [1 for i in range(1)]           
+plot_data = []
+no_improvement_counter, max_no_improvement = 0, 10
+iterations, max_iterations = 0, 100
+
+start_time = time.time()
+solution = initialization(n_a, n_u, n_d, n_c, u_d)  
+bestSolution = copy.deepcopy(solution)        
+n_d = objective_calculation(bestSolution)
+storage_destroy_pool = np.zeros((20, n_a+1, n_u+1, 3), dtype=int)    
+storage_repair_pool = np.zeros((20, n_a+1, n_u+1, 3), dtype=int)      
+
+while iterations < max_iterations:  # while stop criteria not met
+    originalSolution, destroyedSolution, destroyOperatorIndex, activity_index = destroy_operator(wDestroy, solution, n_a, n_u, n_c, u_d, n_d)
+    unit_time = preprocess(n_a, n_u, n_d, u_d)                  
+    ctr = update_time(destroyedSolution, unit_time, u_d)
+
+    if destroyOperatorIndex == 0 or destroyOperatorIndex == 1:     
+        newSolution, pan = repair_operator(destroyedSolution, u_d, n_c, bestSolution, ctr)  
+    else:
+        is_duplicate = np.array_equal(storage_destroy_pool, destroyedSolution)  
+        if np.any(is_duplicate):          
+            duplicate_indices = np.where(is_duplicate)[0]
+            newSolution = storage_repair_pool[duplicate_indices]
+        else:    
+            empty_indices = np.where(np.all(storage_destroy_pool == 0, axis=(1, 2, 3)))
+            random_index = np.random.choice(empty_indices[0])
+            storage_destroy_pool[random_index] = destroyedSolution
+            newSolution, pan = repair_operator(destroyedSolution, u_d, n_c, bestSolution, ctr) 
+            storage_repair_pool[random_index] = newSolution
+
+    if objective_calculation(newSolution) <= objective_calculation(solution):
+        solution = newSolution        
+        if not np.array_equal(solution, newSolution):  
+            storage_repair_pool[:] = 0
+            storage_repair_pool[:] = 0
+        if objective_calculation(newSolution) < objective_calculation(bestSolution):
+            bestSolution = newSolution
+            n_d = objective_calculation(newSolution)
+            no_improvement_counter = 0
+            destroyScore[destroyOperatorIndex] += 1.5  # update the score of the operators
+        else:
+            destroyScore[destroyOperatorIndex] += 0
+            no_improvement_counter += 1
+    else:  # the simulated annealing acceptance criteria
+        no_improvement_counter += 1
+        if rd.random() < np.exp(- objective_calculation(newSolution) / T):
+            solution = newSolution
+            if not np.array_equal(solution, newSolution):  
+                storage_repair_pool[:] = 0
+                storage_repair_pool[:] = 0
+            destroyScore[destroyOperatorIndex] += 0
+        else:
+            destroyScore[destroyOperatorIndex] += 0
+
+    wDestroy[destroyOperatorIndex] = \
+        wDestroy[destroyOperatorIndex] * b \
+        + (1 - b) * (destroyScore[destroyOperatorIndex] / destroyUseTimes[destroyOperatorIndex])
+
+    if no_improvement_counter >= max_no_improvement:
+        break
+
+    T = a * T
+    iterations += 1
+    plot_data.append(objective_calculation(bestSolution))    
+
+
+end_time = time.time()
+
+print(bestSolution)
+print(objective_calculation(bestSolution))
+print(end_time - start_time)
+
+
+x = list(range(len(plot_data)))
+y = plot_data
+fig, ax = plt.subplots()
+ax.plot(x, y)
+ax.set_xlabel('iterations')
+ax.set_ylabel('objective_value')
+plt.show()
+
+
+
+
+
+
+
+
+
